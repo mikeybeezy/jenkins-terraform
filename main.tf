@@ -30,21 +30,19 @@ resource "aws_security_group" "jenkins_sg" {
   vpc_id      = aws_default_vpc.default_vpc.id
 
   ingress {
-    description      = "ssh access"
-    from_port        = 22
-    to_port          = 22
-    protocol         = "tcp"
-    cidr_blocks      = [aws_vpc.main.cidr_block]
-    ipv6_cidr_blocks = [aws_vpc.main.ipv6_cidr_block]
+    description = "ssh access"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"] # currently open to the world
   }
 
   ingress {
-    description      = "Jenkins HTTP access"
-    from_port        = 8080
-    to_port          = 8080
-    protocol         = "tcp"
-    cidr_blocks      = [aws_vpc.main.cidr_block]
-    ipv6_cidr_blocks = [aws_vpc.main.ipv6_cidr_block]
+    description = "Jenkins HTTP access"
+    from_port   = 8080
+    to_port     = 8080
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"] # currently open to the world
   }
 
   egress {
@@ -63,7 +61,7 @@ resource "aws_security_group" "jenkins_sg" {
 # JENKINS SERVER 
 
 resource "aws_instance" "jenkins_server" {
-  ami                    = "ami-00463ddd1036a8eb6" # eu-west-1
+  ami                    = "ami-00463ddd1036a8eb6" # eu-west-1 ami-05e786af422f8082a
   instance_type          = "t2.micro"
   subnet_id              = aws_default_subnet.default_az1.id
   vpc_security_group_ids = [aws_security_group.jenkins_sg.id]
@@ -77,10 +75,10 @@ resource "aws_instance" "jenkins_server" {
 
 #SSH to instance 
 
-resource "null_resource" "cluster" {
+resource "null_resource" "instance_bootstrap" {
   # Changes to any instance of the cluster requires re-provisioning
   triggers = {
-    cluster_instance_ids = join(",", aws_instance.cluster.*.id)
+    cluster_instance_ids = join(",", aws_instance.jenkins_server.*.id)
   }
 
   # Bootstrap script can run on any instance of the cluster
@@ -92,11 +90,29 @@ resource "null_resource" "cluster" {
     host        = aws_instance.jenkins_server.public_ip
   }
 
+  provisioner "file" {
+    source      = "install_jenkins.sh"
+    destination = "/tmp/install_jenkins.sh"
+
+  }
+
+
   provisioner "remote-exec" {
     # Bootstrap script called with private_ip of each node in the cluster
     inline = [
-      "bootstrap-cluster.sh ${join(" ",
-      aws_instance.cluster.*.private_ip)}",
+      "sudo apt install default-jre -y",
+      "sudo chmod +x /tmp/install_jenkins.sh",
+      "sh /tmp/install_jenkins.sh"
+
     ]
   }
+
+  depends_on = [
+    aws_instance.jenkins_server
+  ]
+}
+
+output "jenkins-url" {
+  value = join("", ["http://", aws_instance.jenkins_server.public_dns, ":", "8080"])
+
 }
